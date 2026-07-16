@@ -8,7 +8,8 @@
     "build": "kanabun build"
   },
   "dependencies": {
-    "@kanabun/core": "^0.0.1"
+    "@kanabun/core": "^0.0.1",
+    "@noble/curves": "^2.2.0"
   },
   "devDependencies": {
     "@kanabun/cli": "^0.0.1",
