@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "kanabun dev",
-    "build": "kanabun build"
+    "build": "kanabun build",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@kanabun/core": "^0.0.1",
@@ -14,6 +15,7 @@
   "devDependencies": {
     "@kanabun/cli": "^0.0.1",
     "@kanabun/testing": "^0.0.1",
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "typescript": "^7.0.2"
   }
 }
