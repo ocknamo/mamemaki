@@ -28,6 +28,18 @@ describe("App", () => {
     dispose();
   });
 
+  test("component styles are attached as scoped css`` classes", () => {
+    const { container, dispose } = renderTest(() => <App />);
+    // every styled block carries a k-<hash> class from @kanabun/core's css``
+    for (const cls of ["app", "app-header", "send-bar", "add-row"]) {
+      expect(getByClass(container, cls).getAttribute("class")).toMatch(/\bk-[a-z0-9]+\b/);
+    }
+    for (const card of queryAllByClass(container, "card")) {
+      expect(card.getAttribute("class")).toMatch(/\bk-[a-z0-9]+\b/);
+    }
+    dispose();
+  });
+
   test("add/remove rows", () => {
     const { container, dispose } = renderTest(() => <App />);
     fireEvent.click(getByClass(container, "add-row"));

@@ -1,4 +1,4 @@
-import { signal, computed, For, Show } from "@kanabun/core";
+import { signal, computed, css, For, Show } from "@kanabun/core";
 import type { Signal } from "@kanabun/core";
 import { parseCsv } from "./lib/csv";
 import { NwcClient, parseNwcUri } from "./lib/nwc";
@@ -7,6 +7,290 @@ import type { SendStatus } from "./lib/types";
 import { isValidLightningAddress, parseAmountSats } from "./lib/validation";
 
 const NWC_STORAGE_KEY = "split-ln-sender.nwc-uri";
+
+// ── Scoped styles (kanabun css``) ─────────────────────────────────
+// Design tokens (--bg, --accent, …) and the body/reset base live in
+// index.html; everything component-shaped is scoped here.
+
+const shellStyles = css`
+  max-width: 30rem;
+  margin: 0 auto;
+  padding: 1rem 0.9rem 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+
+  input,
+  textarea {
+    width: 100%;
+    font: inherit;
+    font-size: 16px; /* prevent iOS zoom-on-focus */
+    color: inherit;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 0.55rem 0.6rem;
+    box-sizing: border-box;
+  }
+  input:focus,
+  textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+    border-color: var(--accent);
+  }
+  input[aria-invalid] {
+    border-color: var(--danger);
+  }
+  input:disabled {
+    background: var(--bg);
+    color: var(--muted);
+  }
+  @media (min-width: 40rem) {
+    padding-top: 2rem;
+  }
+`;
+
+const headerStyles = css`
+  padding: 0.25rem 0.2rem 0.75rem;
+  h1 {
+    margin: 0;
+    font-size: 1.45rem;
+    letter-spacing: -0.01em;
+  }
+  .tagline {
+    margin: 0.15rem 0 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+`;
+
+const cardStyles = css`
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0.9rem;
+  margin-bottom: 0.75rem;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.05);
+  h2 {
+    margin: 0 0 0.6rem;
+    font-size: 1rem;
+    letter-spacing: 0.01em;
+  }
+`;
+
+const ghostBtnStyles = css`
+  display: inline-block;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  border-radius: 9px;
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+  &:active {
+    background: var(--bg);
+  }
+  &:disabled {
+    color: var(--muted);
+    cursor: default;
+    opacity: 0.6;
+  }
+`;
+
+const recipientsStyles = css`
+  .row-head {
+    display: grid;
+    grid-template-columns: 1fr 6.2rem 2rem;
+    gap: 0.4rem;
+    font-size: 0.72rem;
+    color: var(--muted);
+    margin-bottom: 0.3rem;
+    padding: 0 0.1rem;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 1fr 6.2rem 2rem;
+    gap: 0.4rem;
+    align-items: center;
+    margin-bottom: 0.45rem;
+  }
+  .amt {
+    text-align: right;
+  }
+  .icon-btn {
+    border: none;
+    background: none;
+    color: var(--muted);
+    font-size: 1rem;
+    padding: 0.4rem 0.2rem;
+    cursor: pointer;
+    border-radius: 8px;
+  }
+  .icon-btn:active {
+    background: var(--bg);
+  }
+  .add-row {
+    width: 100%;
+    margin-top: 0.15rem;
+    border-style: dashed;
+    color: var(--muted);
+  }
+  .empty {
+    color: var(--muted);
+    font-size: 0.9rem;
+    text-align: center;
+    margin: 0.5rem 0;
+  }
+  .csv {
+    margin-top: 0.75rem;
+    border-top: 1px solid var(--border);
+    padding-top: 0.6rem;
+  }
+  .csv summary {
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+  .csv textarea {
+    margin-top: 0.5rem;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85rem;
+  }
+  .csv-add {
+    margin-top: 0.45rem;
+  }
+  .error-list {
+    margin: 0.5rem 0 0;
+    padding-left: 1.1rem;
+    color: var(--danger);
+    font-size: 0.82rem;
+  }
+`;
+
+const nwcStyles = css`
+  .nwc-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.55rem;
+  }
+  .nwc-status {
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .nwc-status.connected {
+    color: var(--success);
+    font-weight: 600;
+  }
+  .error-text {
+    margin: 0.5rem 0 0;
+    color: var(--danger);
+    font-size: 0.85rem;
+    overflow-wrap: anywhere;
+  }
+`;
+
+const progressStyles = css`
+  .progress-count {
+    margin: 0 0 0.5rem;
+    font-size: 1.2rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .progress-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .progress-list li {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.4rem 0.1rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.9rem;
+  }
+  .progress-list li:last-child {
+    border-bottom: none;
+  }
+  .st-icon {
+    width: 1.1rem;
+    text-align: center;
+    flex: none;
+  }
+  .st-who {
+    flex: 1;
+    overflow-wrap: anywhere;
+  }
+  .st-res {
+    color: var(--muted);
+    font-size: 0.82rem;
+    text-align: right;
+    max-width: 45%;
+    overflow-wrap: anywhere;
+  }
+  .st-success .st-icon,
+  .st-success .st-res {
+    color: var(--success);
+  }
+  .st-failed .st-icon,
+  .st-failed .st-res {
+    color: var(--danger);
+  }
+  .result-summary {
+    margin: 0.6rem 0 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+`;
+
+const sendBarStyles = css`
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  background: linear-gradient(to top, var(--bg) 75%, transparent);
+  padding: 0.75rem 0 calc(0.75rem + env(safe-area-inset-bottom));
+  .totals {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.9rem;
+    color: var(--muted);
+    padding: 0 0.2rem 0.5rem;
+  }
+  .totals strong {
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .send-btn {
+    width: 100%;
+    border: none;
+    border-radius: 12px;
+    background: var(--accent);
+    color: #fff;
+    font: inherit;
+    font-size: 1.05rem;
+    font-weight: 700;
+    padding: 0.8rem;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgb(247 147 26 / 0.35);
+  }
+  .send-btn:active {
+    background: var(--accent-dark);
+  }
+  .send-btn:disabled {
+    background: #c7cbd1;
+    box-shadow: none;
+    cursor: default;
+  }
+  .send-hint {
+    margin: 0.4rem 0 0;
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+`;
 
 type RowStatus = "idle" | SendStatus;
 
@@ -188,13 +472,13 @@ export function App() {
   }
 
   return (
-    <main class="app">
-      <header class="app-header">
+    <main class={`app ${shellStyles}`}>
+      <header class={`app-header ${headerStyles}`}>
         <h1>⚡ Split LN Sender</h1>
         <p class="tagline">Lightning Addressへ、まとめて順番に送金</p>
       </header>
 
-      <section class="card">
+      <section class={`card ${cardStyles} ${recipientsStyles}`}>
         <h2>Recipients</h2>
         <div class="row-head">
           <span>Lightning Address</span>
@@ -235,7 +519,7 @@ export function App() {
             </div>
           )}
         </For>
-        <button type="button" class="ghost-btn add-row" onClick={addRow}>
+        <button type="button" class={`ghost-btn add-row ${ghostBtnStyles}`} onClick={addRow}>
           + Add Row
         </button>
 
@@ -254,7 +538,11 @@ export function App() {
               }
             }}
           ></textarea>
-          <button type="button" class="ghost-btn csv-add" onClick={() => addFromCsv(csvText())}>
+          <button
+            type="button"
+            class={`ghost-btn csv-add ${ghostBtnStyles}`}
+            onClick={() => addFromCsv(csvText())}
+          >
             Add from CSV
           </button>
           <Show when={() => csvErrors().length > 0}>
@@ -265,7 +553,7 @@ export function App() {
         </details>
       </section>
 
-      <section class="card">
+      <section class={`card ${cardStyles} ${nwcStyles}`}>
         <h2>NWC</h2>
         <input
           class="nwc-uri"
@@ -280,14 +568,18 @@ export function App() {
           <Show
             when={() => nwcStatus() !== "connected"}
             fallback={
-              <button type="button" class="ghost-btn disconnect" onClick={disconnectNwc}>
+              <button
+                type="button"
+                class={`ghost-btn disconnect ${ghostBtnStyles}`}
+                onClick={disconnectNwc}
+              >
                 Disconnect
               </button>
             }
           >
             <button
               type="button"
-              class="ghost-btn connect"
+              class={`ghost-btn connect ${ghostBtnStyles}`}
               disabled={() => nwcStatus() === "connecting" || nwcUri().trim() === ""}
               onClick={() => void connectNwc()}
             >
@@ -304,7 +596,7 @@ export function App() {
       </section>
 
       <Show when={() => phase() !== "idle"}>
-        <section class="card progress-card">
+        <section class={`card progress-card ${cardStyles} ${progressStyles}`}>
           <h2>{() => (phase() === "sending" ? "Sending…" : "Results")}</h2>
           <p class="progress-count">
             {() => doneCount()} / {() => rows().length}
@@ -330,7 +622,7 @@ export function App() {
         </section>
       </Show>
 
-      <div class="send-bar">
+      <div class={`send-bar ${sendBarStyles}`}>
         <div class="totals">
           <span>
             Recipients: <strong>{() => rows().length}</strong>
