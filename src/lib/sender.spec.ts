@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { LnurlPayParams } from "./lnurl";
+import { UnconfirmedPaymentError } from "./nwc";
 import { sendAll, type SenderDeps } from "./sender";
 import type { ProgressUpdate } from "./types";
 
@@ -30,7 +31,7 @@ describe("sendAll", () => {
       ],
       client,
       (i, u) => updates.push([i, u]),
-      makeDeps(),
+      { deps: makeDeps() },
     );
     // amounts are converted to msats
     expect(paid).toEqual(["lnbc-100000", "lnbc-250000"]);
@@ -61,7 +62,7 @@ describe("sendAll", () => {
       ],
       client,
       (i, u) => updates.push([i, u]),
-      deps,
+      { deps },
     );
     const final = [0, 1, 2].map(
       (i) => updates.filter(([idx]) => idx === i).at(-1)![1],
@@ -82,11 +83,59 @@ describe("sendAll", () => {
       [{ address: "alice@x.test", amountSats: 1 }],
       client,
       (i, u) => updates.push([i, u]),
-      makeDeps(),
+      { deps: makeDeps() },
     );
     expect(updates.at(-1)![1]).toEqual({
       status: "failed",
       error: "支払い失敗: not enough funds",
     });
+  });
+
+  test("an UnconfirmedPaymentError maps to unconfirmed, not failed", async () => {
+    const updates: Array<[number, ProgressUpdate]> = [];
+    const client = {
+      payInvoice: async () => {
+        throw new UnconfirmedPaymentError("タイムアウト: 成立している可能性があります");
+      },
+    };
+    await sendAll(
+      [
+        { address: "alice@x.test", amountSats: 1 },
+        { address: "bob@x.test", amountSats: 2 },
+      ],
+      client,
+      (i, u) => updates.push([i, u]),
+      { deps: makeDeps() },
+    );
+    const final = [0, 1].map((i) => updates.filter(([idx]) => idx === i).at(-1)![1]);
+    expect(final[0].status).toBe("unconfirmed");
+    // the batch still continues after an unconfirmed outcome
+    expect(final[1].status).toBe("unconfirmed");
+  });
+
+  test("aborting cancels the remaining recipients between payments", async () => {
+    const updates: Array<[number, ProgressUpdate]> = [];
+    const ctrl = new AbortController();
+    const client = {
+      payInvoice: async () => {
+        ctrl.abort(); // user hits Cancel while the first payment is in flight
+        return "p";
+      },
+    };
+    await sendAll(
+      [
+        { address: "alice@x.test", amountSats: 1 },
+        { address: "bob@x.test", amountSats: 2 },
+        { address: "carol@x.test", amountSats: 3 },
+      ],
+      client,
+      (i, u) => updates.push([i, u]),
+      { deps: makeDeps(), signal: ctrl.signal },
+    );
+    const final = [0, 1, 2].map((i) => updates.filter(([idx]) => idx === i).at(-1)![1]);
+    // the in-flight payment completes; everything after is cancelled unpaid
+    expect(final[0]).toEqual({ status: "success" });
+    expect(final[1]).toEqual({ status: "cancelled" });
+    expect(final[2]).toEqual({ status: "cancelled" });
   });
 });

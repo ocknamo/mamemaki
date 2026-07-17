@@ -61,6 +61,30 @@ export function signEvent(template: EventTemplate, secretHex: string): NostrEven
   return { id, pubkey, created_at, kind: template.kind, tags: template.tags, content: template.content, sig };
 }
 
+/**
+ * Verify an event's integrity: recompute the NIP-01 id from its fields and
+ * check the schnorr signature against it. Anything from a relay must pass this
+ * before being trusted — filters (`authors`, `#e`, …) are requests, not
+ * guarantees.
+ */
+export function verifyEvent(event: NostrEvent): boolean {
+  try {
+    const serialized = JSON.stringify([
+      0,
+      event.pubkey,
+      event.created_at,
+      event.kind,
+      event.tags,
+      event.content,
+    ]);
+    const id = bytesToHex(sha256(new TextEncoder().encode(serialized)));
+    if (id !== event.id) return false;
+    return schnorr.verify(hexToBytes(event.sig), hexToBytes(id), hexToBytes(event.pubkey));
+  } catch {
+    return false;
+  }
+}
+
 function toBase64(bytes: Uint8Array): string {
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);

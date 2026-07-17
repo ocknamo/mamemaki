@@ -1,6 +1,7 @@
 import { computed, css, For, Show } from "@kanabun/core";
 import type { Accessor } from "@kanabun/core";
-import type { Row, RowStatus } from "../model";
+import type { SendStatus } from "../lib/types";
+import type { ProgressEntry } from "../model";
 import { cardStyles } from "./styles";
 
 const progressStyles = css`
@@ -50,64 +51,95 @@ const progressStyles = css`
   .st-failed .st-res {
     color: var(--danger);
   }
+  .st-unconfirmed .st-icon,
+  .st-unconfirmed .st-res {
+    color: var(--warn);
+  }
   .result-summary {
     margin: 0.6rem 0 0;
     font-size: 0.9rem;
     font-weight: 600;
   }
+  .unconfirmed-note {
+    margin: 0.6rem 0 0;
+    padding: 0.5rem 0.6rem;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--warn) 12%, transparent);
+    color: var(--warn);
+    font-size: 0.82rem;
+  }
 `;
 
-const STATUS_ICON: Record<RowStatus, string> = {
-  idle: "",
+const STATUS_ICON: Record<SendStatus, string> = {
   pending: "•",
   resolving: "…",
   paying: "…",
   success: "✓",
   failed: "✗",
+  unconfirmed: "?",
+  cancelled: "–",
 };
 
-const STATUS_LABEL: Record<RowStatus, string> = {
-  idle: "",
+const STATUS_LABEL: Record<SendStatus, string> = {
   pending: "waiting",
   resolving: "resolving…",
   paying: "paying…",
   success: "Success",
   failed: "Failed",
+  unconfirmed: "Unknown",
+  cancelled: "Cancelled",
 };
 
 export interface ProgressCardProps {
-  rows: Accessor<Row[]>;
+  entries: Accessor<ProgressEntry[]>;
   phase: Accessor<"idle" | "sending" | "done">;
   doneCount: Accessor<number>;
 }
 
-/** Per-recipient send progress and, once done, the result summary. */
-export function ProgressCard({ rows, phase, doneCount }: ProgressCardProps) {
-  const successCount = computed(() => rows().filter((r) => r.status() === "success").length);
-  const failedCount = computed(() => rows().filter((r) => r.status() === "failed").length);
+/**
+ * Per-recipient send progress and, once done, the result summary. Renders from
+ * the send-time snapshot, so edits to the recipient list afterwards can never
+ * relabel what was actually paid.
+ */
+export function ProgressCard({ entries, phase, doneCount }: ProgressCardProps) {
+  const count = (s: SendStatus) =>
+    computed(() => entries().filter((e) => e.status() === s).length);
+  const successCount = count("success");
+  const failedCount = count("failed");
+  const unconfirmedCount = count("unconfirmed");
+  const cancelledCount = count("cancelled");
 
   return (
     <section class={`card progress-card ${cardStyles} ${progressStyles}`}>
       <h2>{() => (phase() === "sending" ? "Sending…" : "Results")}</h2>
       <p class="progress-count">
-        {() => doneCount()} / {() => rows().length}
+        {() => doneCount()} / {() => entries().length}
       </p>
       <ul class="progress-list">
-        <For each={() => rows()}>
-          {(row: Row) => (
-            <li class={() => `st-${row.status()}`}>
-              <span class="st-icon">{() => STATUS_ICON[row.status()]}</span>
-              <span class="st-who">{() => row.address()}</span>
+        <For each={() => entries()}>
+          {(entry: ProgressEntry) => (
+            <li class={() => `st-${entry.status()}`}>
+              <span class="st-icon">{() => STATUS_ICON[entry.status()]}</span>
+              <span class="st-who">{entry.address}</span>
               <span class="st-res">
-                {() => (row.status() === "failed" ? row.error() : STATUS_LABEL[row.status()])}
+                {() => (entry.status() === "failed" || entry.status() === "unconfirmed"
+                  ? entry.error()
+                  : STATUS_LABEL[entry.status()])}
               </span>
             </li>
           )}
         </For>
       </ul>
+      <Show when={() => unconfirmedCount() > 0}>
+        <p class="unconfirmed-note">
+          「?」の支払いは成立している可能性があります。再送する前にウォレットの履歴で成否を確認してください。
+        </p>
+      </Show>
       <Show when={() => phase() === "done"}>
         <p class="result-summary">
           Success: {() => successCount()} / Failed: {() => failedCount()}
+          {() => (unconfirmedCount() > 0 ? ` / Unknown: ${unconfirmedCount()}` : "")}
+          {() => (cancelledCount() > 0 ? ` / Cancelled: ${cancelledCount()}` : "")}
         </p>
       </Show>
     </section>

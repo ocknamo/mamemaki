@@ -8,7 +8,7 @@ import { storage } from "./lib/storage";
 import { NwcClient, parseNwcUri } from "./lib/nwc";
 import { sendAll } from "./lib/sender";
 import { isValidLightningAddress, parseAmountSats } from "./lib/validation";
-import { makeRow, type Row } from "./model";
+import { isTerminal, makeProgressEntries, makeRow, type ProgressEntry, type Row } from "./model";
 
 const NWC_STORAGE_KEY = "split-ln-sender.nwc-uri";
 
@@ -41,7 +41,8 @@ const shellStyles = css`
   input[aria-invalid] {
     border-color: var(--danger);
   }
-  input:disabled {
+  input:disabled,
+  textarea:disabled {
     background: var(--bg);
     color: var(--muted);
   }
@@ -59,7 +60,11 @@ export function App() {
   let client: NwcClient | null = null;
 
   const phase = signal<"idle" | "sending" | "done">("idle");
-  const doneCount = signal(0);
+  const progress = signal<ProgressEntry[]>([]);
+  let abortCtrl: AbortController | null = null;
+
+  const sending = computed(() => phase() === "sending");
+  const doneCount = computed(() => progress().filter((e) => isTerminal(e.status())).length);
 
   const total = computed(() =>
     rows().reduce((sum, r) => sum + (parseAmountSats(r.amount()) ?? 0), 0),
@@ -72,11 +77,9 @@ export function App() {
           isValidLightningAddress(r.address().trim()) && parseAmountSats(r.amount()) !== null,
       ),
   );
-  const canSend = computed(
-    () => phase() !== "sending" && nwcStatus() === "connected" && allValid(),
-  );
+  const canSend = computed(() => !sending() && nwcStatus() === "connected" && allValid());
   const sendHint = computed(() => {
-    if (phase() === "sending") return "";
+    if (sending()) return "";
     if (!allValid()) return "有効な送金先を1件以上入力してください";
     if (nwcStatus() !== "connected") return "NWCウォレットを接続してください";
     return "";
@@ -95,6 +98,15 @@ export function App() {
     const next = new NwcClient(conn);
     try {
       await next.connect();
+      // "Connected" must mean more than an open socket: fetch the wallet's
+      // info event to prove the pubkey is live here and supports what we need.
+      const info = await next.getInfo();
+      if (!info.methods.includes("pay_invoice")) {
+        throw new Error("このウォレットは pay_invoice に対応していません");
+      }
+      if (info.encryptions && !info.encryptions.some((e) => e.startsWith("nip04"))) {
+        throw new Error("このウォレットは NIP-04 暗号化に対応していません");
+      }
       client?.close();
       client = next;
       storage.set(NWC_STORAGE_KEY, nwcUri().trim());
@@ -116,31 +128,35 @@ export function App() {
   async function send() {
     const c = client;
     if (!c || !canSend()) return;
-    const list = rows();
-    const recipients = list.map((r) => ({
+    const recipients = rows().map((r) => ({
       address: r.address().trim(),
       amountSats: parseAmountSats(r.amount())!,
     }));
+    const entries = makeProgressEntries(recipients);
+    progress.set(entries);
     phase.set("sending");
-    doneCount.set(0);
-    for (const r of list) {
-      r.status.set("pending");
-      r.error.set("");
-    }
-    await sendAll(recipients, c, (i, update) => {
-      list[i].status.set(update.status);
-      list[i].error.set(update.error ?? "");
-      if (update.status === "success" || update.status === "failed") {
-        doneCount.update((n) => n + 1);
-      }
-    });
+    abortCtrl = new AbortController();
+    await sendAll(
+      recipients,
+      c,
+      (i, update) => {
+        entries[i].status.set(update.status);
+        entries[i].error.set(update.error ?? "");
+      },
+      { signal: abortCtrl.signal },
+    );
+    abortCtrl = null;
     phase.set("done");
+  }
+
+  function cancelSend() {
+    abortCtrl?.abort();
   }
 
   return (
     <main class={`app ${shellStyles}`}>
       <AppHeader />
-      <RecipientsCard rows={rows} />
+      <RecipientsCard rows={rows} sending={sending} />
       <NwcCard
         uri={nwcUri}
         status={nwcStatus}
@@ -149,15 +165,16 @@ export function App() {
         onDisconnect={disconnectNwc}
       />
       <Show when={() => phase() !== "idle"}>
-        <ProgressCard rows={rows} phase={phase} doneCount={doneCount} />
+        <ProgressCard entries={progress} phase={phase} doneCount={doneCount} />
       </Show>
       <SendBar
         count={() => rows().length}
         totalSats={total}
-        sending={() => phase() === "sending"}
+        sending={sending}
         canSend={canSend}
         hint={sendHint}
         onSend={() => void send()}
+        onCancel={cancelSend}
       />
     </main>
   );

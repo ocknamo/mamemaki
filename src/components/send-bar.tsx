@@ -45,6 +45,22 @@ const sendBarStyles = css`
     font-size: 0.8rem;
     color: var(--muted);
   }
+  .cancel-btn {
+    width: 100%;
+    margin-top: 0.45rem;
+    border: 1px solid var(--danger);
+    border-radius: 12px;
+    background: #fff;
+    color: var(--danger);
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 0.55rem;
+    cursor: pointer;
+  }
+  .cancel-btn:active {
+    background: color-mix(in srgb, var(--danger) 8%, #fff);
+  }
 `;
 
 export interface SendBarProps {
@@ -54,10 +70,12 @@ export interface SendBarProps {
   canSend: Accessor<boolean>;
   hint: Accessor<string>;
   onSend: () => void;
+  /** Stop the batch after the in-flight payment finishes. */
+  onCancel: () => void;
 }
 
 /** Sticky bottom bar: recipient count, total sats, and the Send button. */
-export function SendBar({ count, totalSats, sending, canSend, hint, onSend }: SendBarProps) {
+export function SendBar({ count, totalSats, sending, canSend, hint, onSend, onCancel }: SendBarProps) {
   return (
     <div class={`send-bar ${sendBarStyles}`}>
       <div class="totals">
@@ -71,6 +89,11 @@ export function SendBar({ count, totalSats, sending, canSend, hint, onSend }: Se
       <button type="button" class="send-btn" disabled={() => !canSend()} onClick={onSend}>
         {() => (sending() ? "Sending…" : "Send")}
       </button>
+      <Show when={() => sending()}>
+        <button type="button" class="cancel-btn" onClick={onCancel}>
+          Cancel(実行中の1件は完了を待ちます)
+        </button>
+      </Show>
       <Show when={() => hint() !== ""}>
         <p class="send-hint">{() => hint()}</p>
       </Show>

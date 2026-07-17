@@ -16,11 +16,26 @@ describe("resolveAddress", () => {
     expect(params.callback).toBe("https://x.test/cb");
   });
 
+  test("lowercases the address per LUD-16", async () => {
+    const calls: string[] = [];
+    const fetchFn: FetchLike = async (url) => {
+      calls.push(url);
+      return json({ tag: "payRequest", callback: "https://x.test/cb", minSendable: 1000, maxSendable: 5000000 });
+    };
+    await resolveAddress("Alice@GetAlby.COM", fetchFn);
+    expect(calls).toEqual(["https://getalby.com/.well-known/lnurlp/alice"]);
+  });
+
   test("categorises HTTP failures", async () => {
     const fetchFn: FetchLike = async () => json({}, false, 404);
     await expect(resolveAddress("ghost@x.test", fetchFn)).rejects.toThrow(
       /Lightning Address取得失敗/,
     );
+  });
+
+  test("rejects a response missing minSendable/maxSendable (LUD-06 required)", async () => {
+    const fetchFn: FetchLike = async () => json({ tag: "payRequest", callback: "https://x.test/cb" });
+    await expect(resolveAddress("a@x.test", fetchFn)).rejects.toThrow(/応答が不正/);
   });
 
   test("rejects a non-payRequest response", async () => {
@@ -41,14 +56,17 @@ describe("fetchInvoice", () => {
     maxSendable: 100_000,
   };
 
+  // 50n = 50 * 100 msat = 5000 msats — matches the requested amount below.
+  const MATCHING_PR = "lnbc50n1qqxyz";
+
   test("fetches the invoice for the amount in msats", async () => {
     const calls: string[] = [];
     const fetchFn: FetchLike = async (url) => {
       calls.push(url);
-      return json({ pr: "lnbc10n1..." });
+      return json({ pr: MATCHING_PR });
     };
     const pr = await fetchInvoice(params, 5000, fetchFn);
-    expect(pr).toBe("lnbc10n1...");
+    expect(pr).toBe(MATCHING_PR);
     expect(calls).toEqual(["https://x.test/cb?amount=5000"]);
   });
 
@@ -56,10 +74,21 @@ describe("fetchInvoice", () => {
     const calls: string[] = [];
     const fetchFn: FetchLike = async (url) => {
       calls.push(url);
-      return json({ pr: "lnbc..." });
+      return json({ pr: MATCHING_PR });
     };
     await fetchInvoice({ ...params, callback: "https://x.test/cb?k=v" }, 5000, fetchFn);
     expect(calls[0]).toBe("https://x.test/cb?k=v&amount=5000");
+  });
+
+  test("rejects an invoice whose amount differs from the request (LUD-06)", async () => {
+    // 10n = 1000 msats, but we ask for 5000
+    const fetchFn: FetchLike = async () => json({ pr: "lnbc10n1qqxyz" });
+    await expect(fetchInvoice(params, 5000, fetchFn)).rejects.toThrow(/金額がリクエストと一致しません/);
+  });
+
+  test("rejects an amountless invoice", async () => {
+    const fetchFn: FetchLike = async () => json({ pr: "lnbc1qqxyz" });
+    await expect(fetchInvoice(params, 5000, fetchFn)).rejects.toThrow(/金額がリクエストと一致しません/);
   });
 
   test("rejects out-of-range amounts before any request", async () => {

@@ -3,6 +3,8 @@
  * params, then fetch a BOLT11 invoice from the callback.
  */
 
+import { decodeBolt11AmountMsats } from "./bolt11";
+
 export interface LnurlPayParams {
   callback: string;
   /** millisats */
@@ -39,7 +41,8 @@ export async function resolveAddress(
   fetchFn: FetchLike = defaultFetch,
   timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<LnurlPayParams> {
-  const [name, domain] = address.split("@");
+  // LUD-16 names are defined lowercase; normalize so mixed-case input resolves.
+  const [name, domain] = address.trim().toLowerCase().split("@");
   const url = `https://${domain}/.well-known/lnurlp/${encodeURIComponent(name)}`;
   let data: unknown;
   try {
@@ -51,14 +54,17 @@ export async function resolveAddress(
   if (d.status === "ERROR") {
     throw new Error(`Lightning Address取得失敗: ${d.reason ?? "サーバーエラー"}`);
   }
-  if (d.tag !== "payRequest" || typeof d.callback !== "string") {
+  // LUD-06 requires callback, minSendable, and maxSendable — reject rather
+  // than paper over a broken/hostile server with permissive defaults.
+  if (
+    d.tag !== "payRequest" ||
+    typeof d.callback !== "string" ||
+    typeof d.minSendable !== "number" ||
+    typeof d.maxSendable !== "number"
+  ) {
     throw new Error("Lightning Address取得失敗: LNURL-pay応答が不正です");
   }
-  return {
-    callback: d.callback,
-    minSendable: typeof d.minSendable === "number" ? d.minSendable : 1,
-    maxSendable: typeof d.maxSendable === "number" ? d.maxSendable : Number.MAX_SAFE_INTEGER,
-  };
+  return { callback: d.callback, minSendable: d.minSendable, maxSendable: d.maxSendable };
 }
 
 /** Fetch a BOLT11 invoice for `amountMsats` from the LNURL-pay callback. */
@@ -87,6 +93,12 @@ export async function fetchInvoice(
   }
   if (typeof d.pr !== "string" || d.pr === "") {
     throw new Error("Invoice取得失敗: 応答にinvoiceがありません");
+  }
+  // LUD-06: the payer MUST verify the invoice amount equals what was requested
+  // — otherwise a hostile LNURL server can hand back an invoice for any amount.
+  const invoiceMsats = decodeBolt11AmountMsats(d.pr);
+  if (invoiceMsats === null || invoiceMsats !== BigInt(amountMsats)) {
+    throw new Error("Invoice取得失敗: invoiceの金額がリクエストと一致しません");
   }
   return d.pr;
 }

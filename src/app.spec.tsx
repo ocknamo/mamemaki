@@ -8,7 +8,10 @@ import {
   setValue,
 } from "@kanabun/testing";
 import type { MockNode } from "@kanabun/testing";
+import { signal } from "@kanabun/core";
 import { App } from "./app";
+import { RecipientsCard } from "./components/recipients-card";
+import { makeRow } from "./model";
 
 function type(input: MockNode, value: string) {
   setValue(input, value);
@@ -88,6 +91,17 @@ describe("App", () => {
     fireEvent.click(getByClass(container, "csv-add"));
     expect(queryAllByClass(container, "row")).toHaveLength(1);
     expect(html()).toContain("2行目");
+    dispose();
+  });
+
+  test("the whole editor locks while a batch is sending", () => {
+    const rows = signal([makeRow("alice@getalby.com", "100")]);
+    const { container, dispose } = renderTest(() => (
+      <RecipientsCard rows={rows} sending={() => true} />
+    ));
+    for (const cls of ["addr", "amt", "remove", "add-row", "csv-add"]) {
+      expect(getByClass(container, cls).hasAttribute("disabled")).toBe(true);
+    }
     dispose();
   });
 

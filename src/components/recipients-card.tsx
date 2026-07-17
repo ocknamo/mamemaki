@@ -1,5 +1,5 @@
 import { css, For, Show, signal } from "@kanabun/core";
-import type { Signal } from "@kanabun/core";
+import type { Accessor, Signal } from "@kanabun/core";
 import { parseCsv } from "../lib/csv";
 import { isValidLightningAddress, parseAmountSats } from "../lib/validation";
 import { makeRow, type Row } from "../model";
@@ -36,6 +36,10 @@ const recipientsStyles = css`
   }
   .icon-btn:active {
     background: var(--bg);
+  }
+  .icon-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
   .add-row {
     width: 100%;
@@ -78,10 +82,12 @@ const recipientsStyles = css`
 
 export interface RecipientsCardProps {
   rows: Signal<Row[]>;
+  /** While a batch is running the whole editor is locked. */
+  sending: Accessor<boolean>;
 }
 
 /** Recipient list editor: row add/edit/remove plus CSV paste intake. */
-export function RecipientsCard({ rows }: RecipientsCardProps) {
+export function RecipientsCard({ rows, sending }: RecipientsCardProps) {
   const csvText = signal("");
   const csvErrors = signal<string[]>([]);
 
@@ -97,8 +103,8 @@ export function RecipientsCard({ rows }: RecipientsCardProps) {
     return v !== "" && parseAmountSats(v) === null;
   };
 
-  function addFromCsv(text: string) {
-    const { recipients, errors } = parseCsv(text);
+  function addFromCsv() {
+    const { recipients, errors, invalidLines } = parseCsv(csvText());
     csvErrors.set(errors);
     if (recipients.length > 0) {
       rows.update((list) => [
@@ -107,7 +113,8 @@ export function RecipientsCard({ rows }: RecipientsCardProps) {
         ...recipients.map((rc) => makeRow(rc.address, String(rc.amountSats))),
       ]);
     }
-    if (errors.length === 0) csvText.set("");
+    // 失敗した行は原文のままテキストエリアに残し、修正して再投入できるようにする
+    csvText.set(invalidLines.join("\n"));
   }
 
   return (
@@ -130,6 +137,7 @@ export function RecipientsCard({ rows }: RecipientsCardProps) {
               placeholder="alice@getalby.com"
               value={() => row.address()}
               aria-invalid={() => addressInvalid(row)}
+              disabled={() => sending()}
               onInput={(e: Event) => row.address.set((e.target as HTMLInputElement).value)}
             />
             <input
@@ -139,12 +147,14 @@ export function RecipientsCard({ rows }: RecipientsCardProps) {
               placeholder="100"
               value={() => row.amount()}
               aria-invalid={() => amountInvalid(row)}
+              disabled={() => sending()}
               onInput={(e: Event) => row.amount.set((e.target as HTMLInputElement).value)}
             />
             <button
               type="button"
               class="icon-btn remove"
               aria-label="行を削除"
+              disabled={() => sending()}
               onClick={() => removeRow(row)}
             >
               ✕
@@ -152,7 +162,12 @@ export function RecipientsCard({ rows }: RecipientsCardProps) {
           </div>
         )}
       </For>
-      <button type="button" class={`ghost-btn add-row ${ghostBtnStyles}`} onClick={addRow}>
+      <button
+        type="button"
+        class={`ghost-btn add-row ${ghostBtnStyles}`}
+        disabled={() => sending()}
+        onClick={addRow}
+      >
         + Add Row
       </button>
 
@@ -162,19 +177,14 @@ export function RecipientsCard({ rows }: RecipientsCardProps) {
           rows={3}
           placeholder={"alice@getalby.com,100\nbob@coinos.io,250"}
           value={() => csvText()}
+          disabled={() => sending()}
           onInput={(e: Event) => csvText.set((e.target as HTMLTextAreaElement).value)}
-          onPaste={(e: ClipboardEvent) => {
-            const text = e.clipboardData?.getData("text") ?? "";
-            if (text.includes("@") && text.includes(",")) {
-              e.preventDefault();
-              addFromCsv(text);
-            }
-          }}
         ></textarea>
         <button
           type="button"
           class={`ghost-btn csv-add ${ghostBtnStyles}`}
-          onClick={() => addFromCsv(csvText())}
+          disabled={() => sending()}
+          onClick={addFromCsv}
         >
           Add from CSV
         </button>

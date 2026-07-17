@@ -53,18 +53,42 @@ for each recipient:
   失敗しても次の recipient へ継続
 ```
 
-ステータス遷移: `pending → resolving → paying → success | failed`。
+ステータス遷移: `pending → resolving → paying → success | failed | unconfirmed | cancelled`。
 失敗理由はカテゴリ付きメッセージ(`Lightning Address取得失敗` / `Invoice取得失敗` /
-`支払い拒否`(リレーの OK false)/ `支払い失敗`(ウォレットの error 応答)/ タイムアウト)。
+`支払い拒否`(リレーの OK false)/ `支払い失敗`(ウォレットの error 応答))。
+
+**`unconfirmed`(成否不明)は failed と厳密に区別する。** `pay_invoice` のタイムアウトや
+preimage を欠く応答は「支払いが成立している可能性がある」状態であり、✗ と表示して
+再送を誘発すると二重払いになる。UI は「?」+ 警告文(再送前にウォレット履歴を確認)で表示する。
+
+送金中は送金先リストの編集・追加・削除・CSV取り込みをすべてロックし、
+進捗/結果は **Send 押下時のスナップショット**(`ProgressEntry`)から描画する。
+後からの編集が「実際に支払った先」の表示を書き換えることはない。
+バッチは Cancel ボタンで中断できる(実行中の1件は完了を待ち、残りは `cancelled`)。
 
 ## NWC (NIP-47)
 
 - URI `nostr+walletconnect://<wallet-pubkey>?relay=<url>&secret=<hex>` をパース。
-- Connect = リレーへ WebSocket 接続(能力確認は行わない。エラーは送金時に表面化)。
+- Connect = WebSocket 接続 + **info イベント (kind:13194) の取得・検証**。
+  `pay_invoice` 対応と(encryption タグがあれば)NIP-04 対応を確認してから「接続済み」にする。
 - `pay_invoice`: NIP-04 で暗号化したリクエストを kind:23194 で送信し、
   `#e` フィルタで kind:23195 の応答を購読して待つ。
 - 暗号化は NIP-04(全 NWC ウォレットが対応するベースライン)。
   共有鍵 = ECDH の X 座標、AES-256-CBC は WebCrypto。
+
+### 信頼モデル: リレーと LNURL サーバーは信頼しない
+
+- **リレーからのイベントはすべて検証する**: pubkey がウォレットと一致・kind 一致・
+  `e` タグがこのリクエスト id を指す・NIP-01 の id 再計算 + schnorr 署名検証
+  (`verifyEvent`)。フィルタ(`authors` / `#e`)はリレーへの依頼にすぎず保証ではない。
+  検証に通らないイベント(ゴミ・偽装・過去応答のリプレイ)は **無視して待ち続け**、
+  購読の終了条件は「正当な応答」か「タイムアウト」だけにする。
+- **成功の判定は preimage の存在を要求する**。`error` が無いだけの応答
+  (`result` 欠落・preimage 空)は成功と断言せず `unconfirmed` にする。
+- **invoice の金額を検証する**(LUD-06): bolt11 の HRP から金額をデコードし
+  (`lib/bolt11.ts`)、リクエストした amount と一致しない invoice は拒否する。
+  LNURL 応答は `callback` / `minSendable` / `maxSendable` を必須とし、欠落は不正応答として弾く。
+- LUD-16 に従い Lightning Address は小文字化してから解決する。
 
 ## UI(モバイルファースト)
 
@@ -82,11 +106,19 @@ for each recipient:
 - Amount: 1 以上の整数(sats)。LNURL の min/maxSendable 範囲チェックは invoice 取得時。
 - Send 可能条件: 行が1件以上・全行有効・NWC 接続済み・送金中でない。
 
-## セキュリティ上の注意
+## セキュリティ上の注意と既知の制限
 
 - NWC secret は LocalStorage に URI ごと保存される(MVP の割り切り)。
   支出上限付きの NWC 接続の利用を README で推奨する。
-- リレー・LNURL 応答は信頼しない: JSON を検証し、失敗はカテゴリ付きエラーに変換する。
+- 外部由来の文字列(エラーメッセージ等)は kanabun のテキスト補間
+  (`createTextNode` 経由)で描画されるため HTML としては解釈されない。
+- **既知の制限(MVP で未対応)**:
+  - bolt11 の `description_hash`(LUD-16 metadata の SHA-256)は検証しない。
+  - `sha256(preimage) === payment_hash` の検証はしない(bolt11 を完全デコード
+    していないため payment_hash を持たない)。preimage の存在確認まで。
+  - NWC URI の `relay` は最初の1つのみ使用(単一リレー障害 = 全機能停止)。
+  - `unconfirmed` の自動再確認(`lookup_invoice`)は行わない。ユーザーに
+    ウォレット履歴の確認を促すのみ。
 
 ## テスト
 

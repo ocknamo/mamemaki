@@ -8,10 +8,17 @@ import {
   signEvent,
   type NostrEvent,
 } from "./nostr";
-import { NwcClient, parseNwcUri, type NwcConnection, type WsLike } from "./nwc";
+import {
+  NwcClient,
+  parseNwcUri,
+  UnconfirmedPaymentError,
+  type NwcConnection,
+  type WsLike,
+} from "./nwc";
 
 const WALLET_SECRET = bytesToHex(schnorr.utils.randomSecretKey());
 const CLIENT_SECRET = bytesToHex(schnorr.utils.randomSecretKey());
+const ATTACKER_SECRET = bytesToHex(schnorr.utils.randomSecretKey());
 const WALLET_PUBKEY = getPublicKeyHex(WALLET_SECRET);
 
 describe("parseNwcUri", () => {
@@ -41,9 +48,17 @@ describe("parseNwcUri", () => {
   });
 });
 
+interface FakeRelayOptions {
+  /** kind:13194 info event content; when set the relay serves it. */
+  infoContent?: string;
+  /** extra tags for the info event (e.g. [["encryption", "nip44_v2"]]). */
+  infoTags?: string[][];
+}
+
 /**
  * A fake relay+wallet behind the WsLike interface: opens asynchronously,
- * ACKs published events, and answers pay_invoice requests it can decrypt.
+ * ACKs published events, answers pay_invoice requests it can decrypt, and
+ * serves the wallet's info event when configured.
  */
 class FakeWalletRelay implements WsLike {
   readyState = 0;
@@ -53,17 +68,37 @@ class FakeWalletRelay implements WsLike {
   onmessage: ((e: { data: unknown }) => void) | null = null;
   subs = new Map<string, Record<string, unknown>>();
 
-  constructor(private respond: (invoice: string) => Promise<unknown>) {
+  constructor(
+    private respond: (invoice: string) => Promise<unknown>,
+    private options: FakeRelayOptions = {},
+  ) {
     queueMicrotask(() => {
       this.readyState = 1;
       this.onopen?.();
     });
   }
 
+  deliver(subId: string, event: NostrEvent): void {
+    this.onmessage?.({ data: JSON.stringify(["EVENT", subId, event]) });
+  }
+
   send(raw: string): void {
     const msg = JSON.parse(raw) as unknown[];
     if (msg[0] === "REQ") {
-      this.subs.set(msg[1] as string, msg[2] as Record<string, unknown>);
+      const subId = msg[1] as string;
+      const filter = msg[2] as Record<string, unknown>;
+      this.subs.set(subId, filter);
+      const kinds = (filter.kinds as number[]) ?? [];
+      if (kinds.includes(13194)) {
+        if (this.options.infoContent !== undefined) {
+          const info = signEvent(
+            { kind: 13194, tags: this.options.infoTags ?? [], content: this.options.infoContent },
+            WALLET_SECRET,
+          );
+          this.deliver(subId, info);
+        }
+        this.onmessage?.({ data: JSON.stringify(["EOSE", subId]) });
+      }
     } else if (msg[0] === "EVENT") {
       void this.handlePublish(msg[1] as NostrEvent);
     }
@@ -81,9 +116,7 @@ class FakeWalletRelay implements WsLike {
     );
     for (const [subId, filter] of this.subs) {
       const eTags = (filter["#e"] as string[]) ?? [];
-      if (eTags.includes(request.id)) {
-        this.onmessage?.({ data: JSON.stringify(["EVENT", subId, response]) });
-      }
+      if (eTags.includes(request.id)) this.deliver(subId, response);
     }
   }
 
@@ -99,13 +132,15 @@ const CONN: NwcConnection = {
   secret: CLIENT_SECRET,
 };
 
+const okResult = { result_type: "pay_invoice", result: { preimage: "aa".repeat(32) } };
+
 describe("NwcClient.payInvoice", () => {
   test("full roundtrip: encrypt, publish, decrypt the wallet's result", async () => {
     const seen: string[] = [];
     const client = new NwcClient(CONN, () => {
       return new FakeWalletRelay(async (invoice) => {
         seen.push(invoice);
-        return { result_type: "pay_invoice", result: { preimage: "aa".repeat(32) } };
+        return okResult;
       });
     });
     await client.connect();
@@ -127,7 +162,7 @@ describe("NwcClient.payInvoice", () => {
     client.close();
   });
 
-  test("times out when the wallet never responds", async () => {
+  test("times out as UNCONFIRMED (not failed) when the wallet never responds", async () => {
     const client = new NwcClient(CONN, () => {
       const ws = new FakeWalletRelay(async () => ({}));
       ws.send = (raw: string) => {
@@ -138,7 +173,12 @@ describe("NwcClient.payInvoice", () => {
       return ws;
     });
     await client.connect();
-    await expect(client.payInvoice("lnbc1fake", 50)).rejects.toThrow(/タイムアウト/);
+    const err = await client.payInvoice("lnbc1fake", 50).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(UnconfirmedPaymentError);
+    expect((err as Error).message).toContain("タイムアウト");
     client.close();
   });
 
@@ -156,6 +196,148 @@ describe("NwcClient.payInvoice", () => {
     });
     await client.connect();
     await expect(client.payInvoice("lnbc1fake")).rejects.toThrow(/支払い拒否: blocked: spam/);
+    client.close();
+  });
+
+  test("a success response without a preimage is UNCONFIRMED, not success", async () => {
+    const client = new NwcClient(CONN, () => {
+      return new FakeWalletRelay(async () => ({ result_type: "pay_invoice", result: {} }));
+    });
+    await client.connect();
+    const err = await client.payInvoice("lnbc1fake", 200).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(UnconfirmedPaymentError);
+    client.close();
+  });
+});
+
+describe("NwcClient.payInvoice — hostile relay", () => {
+  test("junk / undecryptable events are ignored and the real response still wins", async () => {
+    let relay!: FakeWalletRelay;
+    const client = new NwcClient(CONN, () => {
+      relay = new FakeWalletRelay(async () => okResult);
+      const origSend = relay.send.bind(relay);
+      relay.send = (raw: string) => {
+        const msg = JSON.parse(raw) as unknown[];
+        if (msg[0] === "REQ" && (msg[1] as string).startsWith("pay-")) {
+          relay.subs.set(msg[1] as string, msg[2] as Record<string, unknown>);
+          // Attack: flood the subscription with garbage before the real answer.
+          relay.deliver(msg[1] as string, { nonsense: true } as unknown as NostrEvent);
+          const junk = signEvent({ kind: 23195, tags: [], content: "not-nip04!!" }, WALLET_SECRET);
+          relay.deliver(msg[1] as string, junk);
+          return;
+        }
+        origSend(raw);
+      };
+      return relay;
+    });
+    await client.connect();
+    // Must NOT reject on the junk — the verified real response settles it.
+    await expect(client.payInvoice("lnbc1fake")).resolves.toBe("aa".repeat(32));
+    client.close();
+  });
+
+  test("a forged response signed by another key is ignored (→ unconfirmed timeout)", async () => {
+    const client = new NwcClient(CONN, () => {
+      const ws = new FakeWalletRelay(async () => ({}));
+      ws.send = (raw: string) => {
+        const msg = JSON.parse(raw) as unknown[];
+        if (msg[0] === "REQ") {
+          ws.subs.set(msg[1] as string, msg[2] as Record<string, unknown>);
+        } else if (msg[0] === "EVENT") {
+          const request = msg[1] as NostrEvent;
+          void (async () => {
+            // Attacker knows the request id but not the wallet's key.
+            const content = await nip04Encrypt(
+              ATTACKER_SECRET,
+              getPublicKeyHex(CLIENT_SECRET),
+              JSON.stringify(okResult),
+            );
+            const forged = signEvent(
+              { kind: 23195, tags: [["e", request.id]], content },
+              ATTACKER_SECRET,
+            );
+            // Claim the wallet's pubkey (breaks the signature check).
+            const impersonated = { ...forged, pubkey: WALLET_PUBKEY };
+            for (const subId of ws.subs.keys()) {
+              ws.deliver(subId, forged);
+              ws.deliver(subId, impersonated);
+            }
+          })();
+        }
+      };
+      return ws;
+    });
+    await client.connect();
+    const err = await client.payInvoice("lnbc1fake", 200).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(UnconfirmedPaymentError);
+    client.close();
+  });
+
+  test("a replayed response for an earlier request is ignored (→ unconfirmed timeout)", async () => {
+    // A genuine wallet-signed success response… for a different request id.
+    const staleContent = await nip04Encrypt(
+      WALLET_SECRET,
+      getPublicKeyHex(CLIENT_SECRET),
+      JSON.stringify(okResult),
+    );
+    const stale = signEvent(
+      { kind: 23195, tags: [["e", "ab".repeat(32)]], content: staleContent },
+      WALLET_SECRET,
+    );
+    const client = new NwcClient(CONN, () => {
+      const ws = new FakeWalletRelay(async () => ({}));
+      ws.send = (raw: string) => {
+        const msg = JSON.parse(raw) as unknown[];
+        if (msg[0] === "REQ") {
+          ws.subs.set(msg[1] as string, msg[2] as Record<string, unknown>);
+          // Attack: replay the old success response into the new subscription.
+          ws.deliver(msg[1] as string, stale);
+        }
+      };
+      return ws;
+    });
+    await client.connect();
+    const err = await client.payInvoice("lnbc1fake", 200).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(UnconfirmedPaymentError);
+    client.close();
+  });
+});
+
+describe("NwcClient.getInfo", () => {
+  test("returns the wallet's methods and encryption schemes", async () => {
+    const client = new NwcClient(CONN, () => {
+      return new FakeWalletRelay(async () => ({}), {
+        infoContent: "pay_invoice get_balance get_info",
+        infoTags: [["encryption", "nip44_v2 nip04"]],
+      });
+    });
+    const info = await client.getInfo();
+    expect(info.methods).toEqual(["pay_invoice", "get_balance", "get_info"]);
+    expect(info.encryptions).toEqual(["nip44_v2", "nip04"]);
+    client.close();
+  });
+
+  test("no encryption tag yields null (NIP-04 implied)", async () => {
+    const client = new NwcClient(CONN, () => {
+      return new FakeWalletRelay(async () => ({}), { infoContent: "pay_invoice" });
+    });
+    const info = await client.getInfo();
+    expect(info.encryptions).toBeNull();
+    client.close();
+  });
+
+  test("rejects when the wallet has no info event on the relay", async () => {
+    const client = new NwcClient(CONN, () => new FakeWalletRelay(async () => ({})));
+    await expect(client.getInfo()).rejects.toThrow(/13194.*見つかりません/);
     client.close();
   });
 });

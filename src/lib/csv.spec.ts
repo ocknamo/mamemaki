@@ -21,7 +21,7 @@ describe("parseCsv", () => {
   });
 
   test("reports bad lines with line numbers but keeps good ones", () => {
-    const { recipients, errors } = parseCsv(
+    const { recipients, errors, invalidLines } = parseCsv(
       "alice@getalby.com,100\nnot-an-address,50\nbob@coinos.io,zero\ncarol@blink.sv",
     );
     expect(recipients).toEqual([{ address: "alice@getalby.com", amountSats: 100 }]);
@@ -29,5 +29,11 @@ describe("parseCsv", () => {
     expect(errors[0]).toContain("2行目");
     expect(errors[1]).toContain("3行目");
     expect(errors[2]).toContain("4行目");
+    // the offending lines survive verbatim so the UI can hand them back
+    expect(invalidLines).toEqual(["not-an-address,50", "bob@coinos.io,zero", "carol@blink.sv"]);
+  });
+
+  test("invalidLines is empty when everything parses", () => {
+    expect(parseCsv("alice@getalby.com,100").invalidLines).toEqual([]);
   });
 });
