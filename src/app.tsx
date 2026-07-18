@@ -38,8 +38,11 @@ const shellStyles = css`
     outline-offset: -1px;
     border-color: var(--accent);
   }
-  input[aria-invalid] {
-    border-color: var(--danger);
+  input[aria-invalid],
+  input.invalid {
+    border-color: var(--warn);
+    outline: 2px solid var(--warn);
+    outline-offset: -1px;
   }
   input:disabled,
   textarea:disabled {

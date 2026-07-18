@@ -73,6 +73,21 @@ describe("App", () => {
     dispose();
   });
 
+  test("fields blocking Send carry the invalid class, empty fields included", () => {
+    const { container, dispose } = renderTest(() => <App />);
+    const addr = getByClass(container, "addr");
+    const amt = getByClass(container, "amt");
+    expect(addr.getAttribute("class")).toMatch(/\binvalid\b/);
+    expect(amt.getAttribute("class")).toMatch(/\binvalid\b/);
+    type(addr, "alice@getalby.com");
+    expect(addr.getAttribute("class")).not.toMatch(/\binvalid\b/);
+    type(amt, "１００"); // full-width digits don't parse
+    expect(amt.getAttribute("class")).toMatch(/\binvalid\b/);
+    type(amt, "100");
+    expect(amt.getAttribute("class")).not.toMatch(/\binvalid\b/);
+    dispose();
+  });
+
   test("CSV add replaces the empty starter row and appends recipients", () => {
     const { html, container, dispose } = renderTest(() => <App />);
     const textarea = getByTag(getByClass(container, "csv"), "textarea");

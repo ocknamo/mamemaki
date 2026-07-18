@@ -102,6 +102,11 @@ export function RecipientsCard({ rows, sending }: RecipientsCardProps) {
     const v = row.amount().trim();
     return v !== "" && parseAmountSats(v) === null;
   };
+  // Send is blocked while ANY field is empty or invalid; tint every blocking
+  // field so the culprit is visible even when it's an untouched empty one
+  // (aria-invalid alone stays reserved for non-empty bad values).
+  const addressBlocking = (row: Row) => !isValidLightningAddress(row.address().trim());
+  const amountBlocking = (row: Row) => parseAmountSats(row.amount()) === null;
 
   function addFromCsv() {
     const { recipients, errors, invalidLines } = parseCsv(csvText());
@@ -129,7 +134,7 @@ export function RecipientsCard({ rows, sending }: RecipientsCardProps) {
         {(row: Row) => (
           <div class="row">
             <input
-              class="addr"
+              class={() => `addr${addressBlocking(row) ? " invalid" : ""}`}
               type="text"
               autocomplete="off"
               autocapitalize="none"
@@ -141,7 +146,7 @@ export function RecipientsCard({ rows, sending }: RecipientsCardProps) {
               onInput={(e: Event) => row.address.set((e.target as HTMLInputElement).value)}
             />
             <input
-              class="amt"
+              class={() => `amt${amountBlocking(row) ? " invalid" : ""}`}
               type="text"
               inputmode="numeric"
               placeholder="100"
