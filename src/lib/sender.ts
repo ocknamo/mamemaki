@@ -35,7 +35,8 @@ export async function sendAll(
     try {
       onUpdate(i, { status: "resolving" });
       const params = await deps.resolveAddress(address);
-      const invoice = await deps.fetchInvoice(params, amountSats * 1000);
+      // LUD-12 comment "#<行番号>" so the sender's wallet history can tell payments apart.
+      const invoice = await deps.fetchInvoice(params, amountSats * 1000, `#${i + 1}`);
       onUpdate(i, { status: "paying" });
       await client.payInvoice(invoice);
       onUpdate(i, { status: "success" });

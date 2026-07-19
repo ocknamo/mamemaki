@@ -45,6 +45,28 @@ describe("sendAll", () => {
     ]);
   });
 
+  test("passes the row number as a LUD-12 comment (#1, #2, ...)", async () => {
+    const comments: Array<string | undefined> = [];
+    const client = { payInvoice: async () => "p" };
+    const deps = makeDeps({
+      fetchInvoice: async (_p, msats, comment) => {
+        comments.push(comment);
+        return `lnbc-${msats}`;
+      },
+    });
+    await sendAll(
+      [
+        { address: "alice@x.test", amountSats: 1 },
+        { address: "bob@x.test", amountSats: 2 },
+        { address: "carol@x.test", amountSats: 3 },
+      ],
+      client,
+      () => {},
+      { deps },
+    );
+    expect(comments).toEqual(["#1", "#2", "#3"]);
+  });
+
   test("a failure is reported with its reason and the batch continues", async () => {
     const updates: Array<[number, ProgressUpdate]> = [];
     const client = { payInvoice: async () => "p" };

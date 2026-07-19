@@ -11,6 +11,8 @@ export interface LnurlPayParams {
   minSendable: number;
   /** millisats */
   maxSendable: number;
+  /** LUD-12: max comment length the server accepts (absent/0 = unsupported) */
+  commentAllowed?: number;
 }
 
 export type FetchLike = (url: string, init?: { signal?: AbortSignal }) => Promise<Response>;
@@ -64,13 +66,20 @@ export async function resolveAddress(
   ) {
     throw new Error("Lightning Address取得失敗: LNURL-pay応答が不正です");
   }
-  return { callback: d.callback, minSendable: d.minSendable, maxSendable: d.maxSendable };
+  return {
+    callback: d.callback,
+    minSendable: d.minSendable,
+    maxSendable: d.maxSendable,
+    // LUD-12 is optional; servers in the wild omit it or send garbage types.
+    ...(typeof d.commentAllowed === "number" ? { commentAllowed: d.commentAllowed } : {}),
+  };
 }
 
 /** Fetch a BOLT11 invoice for `amountMsats` from the LNURL-pay callback. */
 export async function fetchInvoice(
   params: LnurlPayParams,
   amountMsats: number,
+  comment?: string,
   fetchFn: FetchLike = defaultFetch,
   timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<string> {
@@ -80,7 +89,12 @@ export async function fetchInvoice(
     throw new Error(`Invoice取得失敗: 金額が範囲外です (${min}〜${max} sats)`);
   }
   const sep = params.callback.includes("?") ? "&" : "?";
-  const url = `${params.callback}${sep}amount=${amountMsats}`;
+  let url = `${params.callback}${sep}amount=${amountMsats}`;
+  // LUD-12: attach the comment only when the server accepts one this long.
+  // Otherwise send without it — a successful payment beats an identifier.
+  if (comment && params.commentAllowed && comment.length <= params.commentAllowed) {
+    url += `&comment=${encodeURIComponent(comment)}`;
+  }
   let data: unknown;
   try {
     data = await getJson(url, fetchFn, timeoutMs);

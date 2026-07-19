@@ -49,11 +49,14 @@ secp256k1 は WebCrypto に無いため `@noble/curves` を使う。それ以外
 ```
 for each recipient:
   1. resolveAddress   GET https://<domain>/.well-known/lnurlp/<name>   (10s timeout)
-  2. fetchInvoice     GET <callback>?amount=<msats>                    (10s timeout)
+  2. fetchInvoice     GET <callback>?amount=<msats>[&comment=%23<行番号>] (10s timeout)
   3. payInvoice       kind:23194 (pay_invoice) を relay へ publish、
                       kind:23195 の応答を待つ                          (30s timeout)
   失敗しても次の recipient へ継続
 ```
+
+comment は LUD-12 の識別子(`#<行番号>`)で、LNURL-pay 応答の `commentAllowed` が
+長さ十分な場合のみ付与する。非対応サーバーへはコメント無しで送金する(送金成功を優先)。
 
 ステータス遷移: `pending → resolving → paying → success | failed | unconfirmed | cancelled`。
 失敗理由はカテゴリ付きメッセージ(`Lightning Address取得失敗` / `Invoice取得失敗` /
