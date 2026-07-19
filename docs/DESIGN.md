@@ -2,6 +2,8 @@
 
 Lightning Address を複数指定し、NWC (NIP-47) 経由で順番に送金するサーバーレス SPA。
 
+今後の実装候補(MVP 未対応の機能・既知の制限)は [ROADMAP.md](./ROADMAP.md) を参照。
+
 ## 全体構成
 
 ```
