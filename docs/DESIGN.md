@@ -13,11 +13,13 @@ app.tsx (状態の所有 + 送金オーケストレーション + 画面合成)
  │   ├─ styles.ts                共有スコープCSS (card / ghost button)
  │   ├─ header.tsx               AppHeader
  │   ├─ recipients-card.tsx      行編集 + CSV貼り付け(CSVのローカル状態も所有)
+ │   ├─ qr-scan-dialog.tsx       カメラQR読取 (getUserMedia + BarcodeDetector)
  │   ├─ nwc-card.tsx             NWC URI入力 + Connect/Disconnect(表示のみ)
  │   ├─ progress-card.tsx        進捗・結果表示
  │   └─ send-bar.tsx             合計 + Sendボタン(sticky バー)
  └─ lib/
      ├─ csv.ts                   CSV貼り付けのパース
+     ├─ qr.ts                    QRペイロード → Lightning Address 変換 (bech32)
      ├─ validation.ts            Lightning Address / Amount の検証
      ├─ storage.ts               LocalStorage ラッパー
      └─ sender.ts                逐次送金オーケストレーション
