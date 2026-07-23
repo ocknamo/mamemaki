@@ -69,7 +69,7 @@ MVP では「LocalStorage のみ・保存最小限」に絞った領域。
 | 送金先リストの保存 | 入力した送金先リストを LocalStorage に保存・復元 |
 | 送金履歴 | 過去のバッチ送金の結果を保存し、後から参照 |
 | CSV エクスポート | 送金先リストや結果を CSV で書き出し |
-| カメラでの QR 読取による宛先追加 | 端末カメラ(`getUserMedia` + `BarcodeDetector`、非対応環境はデコード用ライブラリでフォールバック)で Lightning Address / LNURL の QR を読み取り、送金先として1行追加する。NWC URI の QR 読取にも流用可 |
+| カメラでの QR 読取による宛先追加 | **実装済み**: 端末カメラ(`getUserMedia` + `BarcodeDetector`)で Lightning Address / LNURL-pay(LUD-16 well-known / LUD-17)の QR を読み取り、送金先として1行追加する。`BarcodeDetector` 非対応ブラウザには案内メッセージを表示(デコード用ライブラリのフォールバックは未対応)。NWC URI の QR 読取への流用は今後の検討 |
 | URL 共有 | 送金先リストを URL に載せて共有(取り扱いに注意が必要なため要検討) |
 
 ## 対応予定なし(または慎重に検討)
@@ -88,6 +88,6 @@ MVP では「LocalStorage のみ・保存最小限」に絞った領域。
 - 上記のうち Phase 1 の `payment_hash` / `description_hash` 照合と Phase 4 の
   NIP-44 は bolt11 の完全デコードや追加の暗号処理を要するため、依存追加の
   是非を含めて設計時に判断する。
-- Phase 5 のカメラ QR 読取は、`BarcodeDetector` 非対応ブラウザではデコード用
-  ライブラリの追加が必要になる可能性がある。まず標準 API で実装し、フォール
-  バックの依存追加は必要時に判断する。
+- Phase 5 のカメラ QR 読取は標準 API(`BarcodeDetector`)のみで実装済み。
+  非対応ブラウザ向けデコード用ライブラリのフォールバックは、依存追加の是非を
+  含めて必要時に判断する。
