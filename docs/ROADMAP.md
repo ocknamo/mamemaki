@@ -60,6 +60,9 @@ Lightning Address の直接入力以外に、Nostr エコシステムから送�
 | WebLN 対応 | NWC に加え、ブラウザ拡張の WebLN を送金経路として選択可能に |
 | WalletConnect 以外の接続 | LNC(Lightning Node Connect)等、他の接続方式 |
 
+接続手段の拡充については [Bitcoin Connect の導入検討](./BITCOIN-CONNECT.md) を参照
+(結論: 接続 UI としてのみの限定採用なら可、支払い経路の置き換えは非推奨)。
+
 ## Phase 5 — 利便性・データ管理
 
 MVP では「LocalStorage のみ・保存最小限」に絞った領域。
