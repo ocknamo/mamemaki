@@ -168,6 +168,74 @@ describe("App", () => {
     }
   });
 
+  test("the camera permission is requested on Scan QR, not on page load", async () => {
+    const g = globalThis as Record<string, unknown>;
+    let requests = 0;
+    const fakeStream = { getTracks: () => [{ stop: () => {} }] };
+    g.BarcodeDetector = class {
+      detect() {
+        return Promise.resolve([]);
+      }
+    };
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: {
+        getUserMedia: () => {
+          requests++;
+          return Promise.resolve(fakeStream);
+        },
+      },
+      configurable: true,
+    });
+    try {
+      const { container, dispose } = renderTest(() => <App />);
+      // rendering the page must not touch the camera (onMount runs on a microtask)
+      await new Promise((r) => setTimeout(r, 0));
+      expect(requests).toBe(0);
+      fireEvent.click(getByClass(container, "scan-qr"));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(requests).toBe(1);
+      dispose();
+    } finally {
+      delete g.BarcodeDetector;
+      delete (navigator as unknown as Record<string, unknown>).mediaDevices;
+    }
+  });
+
+  test("closing the dialog releases the camera; reopening starts a fresh stream", async () => {
+    const g = globalThis as Record<string, unknown>;
+    let requests = 0;
+    let stopped = 0;
+    g.BarcodeDetector = class {
+      detect() {
+        return Promise.resolve([]);
+      }
+    };
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: {
+        getUserMedia: () => {
+          requests++;
+          return Promise.resolve({ getTracks: () => [{ stop: () => stopped++ }] });
+        },
+      },
+      configurable: true,
+    });
+    try {
+      const { container, dispose } = renderTest(() => <App />);
+      fireEvent.click(getByClass(container, "scan-qr"));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(requests).toBe(1);
+      fireEvent.click(getByClass(container, "scan-close"));
+      expect(stopped).toBeGreaterThan(0); // camera released on close
+      fireEvent.click(getByClass(container, "scan-qr"));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(requests).toBe(2); // reopening acquires a fresh stream, not a stale frame
+      dispose();
+    } finally {
+      delete g.BarcodeDetector;
+      delete (navigator as unknown as Record<string, unknown>).mediaDevices;
+    }
+  });
+
   test("an invalid NWC URI shows an error and stays disconnected", () => {
     const { html, container, dispose } = renderTest(() => <App />);
     type(getByClass(container, "nwc-uri"), "not-a-nwc-uri");
