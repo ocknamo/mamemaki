@@ -201,8 +201,11 @@ export function RecipientsCard({ rows, sending }: RecipientsCardProps) {
           📷 Scan QR
         </button>
       </div>
+      {/* 関数で包んで遅延生成にする: カメラ許可はボタンを押した時に初めて要求され、
+          閉じるとダイアログごと破棄されてカメラが解放される(再表示時は新しいストリーム)。
+          子を直接渡すとページ表示時に生成されてしまい、閉じてもカメラが止まらない。 */}
       <Show when={() => scanning()}>
-        <QrScanDialog onDetect={addScanned} onClose={() => scanning.set(false)} />
+        {() => <QrScanDialog onDetect={addScanned} onClose={() => scanning.set(false)} />}
       </Show>
 
       <details class="csv">
