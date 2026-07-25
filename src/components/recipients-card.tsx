@@ -3,6 +3,7 @@ import type { Accessor, Signal } from "@kanabun/core";
 import { parseCsv } from "../lib/csv";
 import { isValidLightningAddress, parseAmountSats } from "../lib/validation";
 import { makeRow, type Row } from "../model";
+import { QrScanDialog } from "./qr-scan-dialog";
 import { cardStyles, ghostBtnStyles } from "./styles";
 
 const recipientsStyles = css`
@@ -41,9 +42,14 @@ const recipientsStyles = css`
     opacity: 0.4;
     cursor: default;
   }
-  .add-row {
-    width: 100%;
+  .add-actions {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.4rem;
     margin-top: 0.15rem;
+  }
+  .add-row,
+  .scan-qr {
     border-style: dashed;
     color: var(--muted);
   }
@@ -90,6 +96,7 @@ export interface RecipientsCardProps {
 export function RecipientsCard({ rows, sending }: RecipientsCardProps) {
   const csvText = signal("");
   const csvErrors = signal<string[]>([]);
+  const scanning = signal(false);
 
   const addRow = () => rows.update((list) => [...list, makeRow()]);
   const removeRow = (row: Row) => rows.update((list) => list.filter((r) => r !== row));
@@ -120,6 +127,15 @@ export function RecipientsCard({ rows, sending }: RecipientsCardProps) {
     }
     // 失敗した行は原文のままテキストエリアに残し、修正して再投入できるようにする
     csvText.set(invalidLines.join("\n"));
+  }
+
+  function addScanned(address: string) {
+    rows.update((list) => [
+      // 完全に空の行(初期行など)は取り込み時に置き換える
+      ...list.filter((r) => r.address().trim() !== "" || r.amount().trim() !== ""),
+      makeRow(address),
+    ]);
+    scanning.set(false);
   }
 
   return (
@@ -167,14 +183,27 @@ export function RecipientsCard({ rows, sending }: RecipientsCardProps) {
           </div>
         )}
       </For>
-      <button
-        type="button"
-        class={`ghost-btn add-row ${ghostBtnStyles}`}
-        disabled={() => sending()}
-        onClick={addRow}
-      >
-        + Add Row
-      </button>
+      <div class="add-actions">
+        <button
+          type="button"
+          class={`ghost-btn add-row ${ghostBtnStyles}`}
+          disabled={() => sending()}
+          onClick={addRow}
+        >
+          + Add Row
+        </button>
+        <button
+          type="button"
+          class={`ghost-btn scan-qr ${ghostBtnStyles}`}
+          disabled={() => sending()}
+          onClick={() => scanning.set(true)}
+        >
+          📷 Scan QR
+        </button>
+      </div>
+      <Show when={() => scanning()}>
+        <QrScanDialog onDetect={addScanned} onClose={() => scanning.set(false)} />
+      </Show>
 
       <details class="csv">
         <summary>Paste CSV</summary>

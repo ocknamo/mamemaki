@@ -5,7 +5,8 @@ Lightning Address を複数指定し、Nostr Wallet Connect (NWC / NIP-47) で
 
 ## 使い方
 
-1. Lightning Address と金額 (sats) を入力(CSV `address,amount` の貼り付けも可)
+1. Lightning Address と金額 (sats) を入力(CSV `address,amount` の貼り付け、
+   カメラでの QR 読取(Lightning Address / LNURL-pay)も可)
 2. NWC 接続 URI (`nostr+walletconnect://...`) を入力して Connect
 3. Send を押すと1件ずつ順番に送金し、進捗と結果(失敗理由つき)を表示
 

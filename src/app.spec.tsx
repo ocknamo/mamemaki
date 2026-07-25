@@ -114,10 +114,58 @@ describe("App", () => {
     const { container, dispose } = renderTest(() => (
       <RecipientsCard rows={rows} sending={() => true} />
     ));
-    for (const cls of ["addr", "amt", "remove", "add-row", "csv-add"]) {
+    for (const cls of ["addr", "amt", "remove", "add-row", "scan-qr", "csv-add"]) {
       expect(getByClass(container, cls).hasAttribute("disabled")).toBe(true);
     }
     dispose();
+  });
+
+  test("Scan QR opens the dialog; without BarcodeDetector it explains, and closes", async () => {
+    const { html, container, dispose } = renderTest(() => <App />);
+    expect(queryAllByClass(container, "scan-overlay")).toHaveLength(0);
+    fireEvent.click(getByClass(container, "scan-qr"));
+    expect(queryAllByClass(container, "scan-overlay")).toHaveLength(1);
+    // the scanner starts from onMount (next microtask); let it run
+    await new Promise((r) => setTimeout(r, 0));
+    // bun's test env has no BarcodeDetector → the standard-API-only fallback message
+    expect(html()).toContain("BarcodeDetector");
+    fireEvent.click(getByClass(container, "scan-close"));
+    expect(queryAllByClass(container, "scan-overlay")).toHaveLength(0);
+    dispose();
+  });
+
+  test("a scanned QR adds the address as a row and closes the dialog", async () => {
+    const g = globalThis as Record<string, unknown>;
+    let stopped = 0;
+    const fakeStream = { getTracks: () => [{ stop: () => stopped++ }] };
+    g.BarcodeDetector = class {
+      detect() {
+        return Promise.resolve([{ rawValue: "lightning:carol@ln.example.com" }]);
+      }
+    };
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: () => Promise.resolve(fakeStream) },
+      configurable: true,
+    });
+    try {
+      const { html, container, dispose } = renderTest(() => <App />);
+      fireEvent.click(getByClass(container, "scan-qr"));
+      // the scan loop polls on an interval; give it one tick
+      await new Promise((r) => setTimeout(r, 500));
+      expect(queryAllByClass(container, "scan-overlay")).toHaveLength(0);
+      const rows = queryAllByClass(container, "row");
+      expect(rows).toHaveLength(1); // the empty starter row was replaced
+      // inputs get `value` as a property, not an attribute
+      expect((getByClass(container, "addr") as MockNode & { value?: string }).value).toBe(
+        "carol@ln.example.com",
+      );
+      expect(html()).toContain("Recipients: <strong>1</strong>");
+      expect(stopped).toBeGreaterThan(0); // camera released
+      dispose();
+    } finally {
+      delete g.BarcodeDetector;
+      delete (navigator as unknown as Record<string, unknown>).mediaDevices;
+    }
   });
 
   test("an invalid NWC URI shows an error and stays disconnected", () => {
