@@ -1,0 +1,6 @@
+[install]
+# Skip versions published less than 3 days ago (259200 s), so a hijacked
+# release is likely caught and unpublished before it reaches this project.
+minimumReleaseAge = 259200
+# kanabun is our own package: take new releases right after publishing them.
+minimumReleaseAgeExcludes = ["@kanabun/core", "@kanabun/cli", "@kanabun/testing"]
